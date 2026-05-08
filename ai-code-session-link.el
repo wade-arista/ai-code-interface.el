@@ -88,6 +88,21 @@ fixed pixel margin instead; zero disables the margin."
 (defconst ai-code-session-link--visible-image-preview-prefix-max-lines 8
   "Maximum previous terminal rows used to rebuild a wrapped image path.")
 
+(defcustom ai-code-session-link-linkify-idle-delay 0.12
+  "Seconds of idle time before delayed session relinkification runs."
+  :type 'number
+  :group 'ai-code)
+
+(defcustom ai-code-session-link-max-fallback-root-entries 200
+  "Skip recursive fallback scanning when ROOT has more than this many entries.
+
+When `project-current' cannot discover a project and ROOT appears very large,
+session linkification avoids `directory-files-recursively' to prevent UI stalls.
+Set this to nil to always allow recursive fallback scans."
+  :type '(choice (const :tag "Always allow fallback recursive scans" nil)
+                 integer)
+  :group 'ai-code)
+
 (defvar ai-code-session-link--keymap
   (let ((map (make-sparse-keymap)))
     (define-key map [mouse-1] #'ai-code-session-navigate-link-at-mouse)
@@ -427,6 +442,9 @@ Tolerates Ghostel hard-wrapping via
 (defvar ai-code-session-link--project-files-cache nil
   "Dynamic cache of project file lists used during one linkify pass.")
 
+(defvar ai-code-session-link--project-file-index-cache nil
+  "Dynamic cache of project file lookup indexes used during one linkify pass.")
+
 (defvar ai-code-session-link--resolved-path-cache nil
   "Dynamic cache of resolved session paths used during one linkify pass.")
 
@@ -508,7 +526,48 @@ Tolerates Ghostel hard-wrapping via
                                (expand-file-name file)
                              (expand-file-name file project-root)))
                          (project-files project)))))
-           (directory-files-recursively root ".*" t))))))
+           (ai-code-session-link--project-files-fallback root))))))
+
+(defun ai-code-session-link--fallback-scan-root-p (root)
+  "Return non-nil when recursive fallback scanning should run for ROOT."
+  (let ((max-entries ai-code-session-link-max-fallback-root-entries))
+    (or (null max-entries)
+        (<= (length (directory-files root nil directory-files-no-dot-files-regexp t))
+            max-entries))))
+
+(defun ai-code-session-link--project-files-fallback (root)
+  "Return recursively enumerated files for ROOT when fallback scanning is safe."
+  (when (and (file-directory-p root)
+             (ai-code-session-link--fallback-scan-root-p root))
+    (directory-files-recursively root ".*" t)))
+
+(defun ai-code-session-link--project-file-index (root &optional project-files)
+  "Return lookup index for ROOT, using PROJECT-FILES when non-nil."
+  (when-let ((project-root (and root (file-name-as-directory (expand-file-name root)))))
+    (ai-code-session-link--cache-get-or-compute
+     ai-code-session-link--project-file-index-cache
+     project-root
+     (lambda ()
+       (let ((files (or project-files
+                        (ai-code-session-link--project-files project-root)))
+             (file-set (make-hash-table :test 'equal))
+             (relative-map (make-hash-table :test 'equal))
+             (basename-map (make-hash-table :test 'equal)))
+         (dolist (file files)
+           (let* ((abs-file (expand-file-name file))
+                  (basename (file-name-nondirectory abs-file))
+                  (relative (ai-code-session-link--relative-under-project-root
+                             abs-file project-root)))
+             (puthash abs-file t file-set)
+             (when (and relative (not (string-empty-p relative)))
+               (puthash relative abs-file relative-map))
+             (puthash basename
+                      (cons abs-file (gethash basename basename-map))
+                      basename-map)))
+         (list :files files
+               :file-set file-set
+               :relative-map relative-map
+               :basename-map basename-map))))))
 
 (defun ai-code-session-link--relative-under-project-root (file project-root)
   "Return FILE as a path relative to PROJECT-ROOT when FILE is inside that tree.
@@ -526,14 +585,15 @@ work that makes `file-relative-name' expensive inside tight loops."
 Optional PROJECT-FILES supplies the project file list."
   (let* ((project-root (and root (file-name-as-directory (expand-file-name root))))
          (candidate (and file (expand-file-name file)))
-         (project-files (or project-files
-                            (and project-root
-                                 (ai-code-session-link--project-files project-root)))))
+         (index (and project-root
+                     (ai-code-session-link--project-file-index
+                      project-root project-files)))
+         (file-set (and index (plist-get index :file-set))))
     (and project-root
          candidate
          (file-exists-p candidate)
          (string-prefix-p project-root (file-name-directory candidate))
-         (member candidate project-files))))
+         (gethash candidate file-set))))
 
 (defun ai-code-session-link--matching-project-files (path root &optional project-files)
   "Return project files in ROOT that match PATH exactly or by basename."
@@ -541,15 +601,19 @@ Optional PROJECT-FILES supplies the project file list."
               (normalized (ai-code-session-link--normalize-file path)))
     (let* ((relative-path (replace-regexp-in-string "\\`\\./" "" normalized))
            (basename (file-name-nondirectory relative-path))
-           (project-files (or project-files
-                              (ai-code-session-link--project-files project-root))))
-      (cl-remove-if-not
-       (lambda (proj-file)
-         (or (equal (ai-code-session-link--relative-under-project-root
-                     proj-file project-root)
-                    relative-path)
-             (string= (file-name-nondirectory proj-file) basename)))
-       project-files))))
+           (index (ai-code-session-link--project-file-index
+                   project-root project-files))
+           (relative-map (and index (plist-get index :relative-map)))
+           (basename-map (and index (plist-get index :basename-map)))
+           (relative-match (and relative-map
+                                (gethash relative-path relative-map)))
+           (basename-matches (and basename-map
+                                  (copy-sequence
+                                   (gethash basename basename-map)))))
+      (delete-dups
+       (delq nil
+             (append (and relative-match (list relative-match))
+                     basename-matches))))))
 
 (defun ai-code-session-link--project-root-for-paths ()
   "Return the current session project root directory with trailing slash."
@@ -1828,6 +1892,8 @@ ALLOW-LOCAL-PROBING controls local existence checks and image previews."
      start end)
     (let ((ai-code-session-link--project-files-cache
            (ai-code-session-link--buffer-project-files-cache))
+          (ai-code-session-link--project-file-index-cache
+           (make-hash-table :test 'equal))
           (ai-code-session-link--resolved-path-cache
            (make-hash-table :test 'equal)))
       (let ((file-links (ai-code-session-link--collect-file-links
@@ -2297,13 +2363,21 @@ visible-window recovery in large terminal scrollback."
     (with-current-buffer buffer
       (unless ai-code-session-link--linkify-timer
         (setq ai-code-session-link--linkify-timer
-              (run-at-time
-               delay nil
-               (lambda (buf)
-                 (when (buffer-live-p buf)
-                   (with-current-buffer buf
-                     (ai-code-session-link--flush-scheduled-linkify))))
-               buffer))))))
+              (if (zerop delay)
+                  (run-with-idle-timer
+                   ai-code-session-link-linkify-idle-delay nil
+                   (lambda (buf)
+                     (when (buffer-live-p buf)
+                       (with-current-buffer buf
+                         (ai-code-session-link--flush-scheduled-linkify))))
+                   buffer)
+                (run-at-time
+                 delay nil
+                 (lambda (buf)
+                   (when (buffer-live-p buf)
+                     (with-current-buffer buf
+                       (ai-code-session-link--flush-scheduled-linkify))))
+                 buffer)))))))
 
 (defun ai-code-session-link--flush-scheduled-linkify ()
   "Apply any delayed session linkification pending in the current buffer."
