@@ -25,13 +25,11 @@
   "Onboarding helpers for AI Code."
   :group 'ai-code)
 
-;;;###autoload
 (defcustom ai-code-onboarding-auto-show t
   "When non-nil, show the quickstart automatically for first-run usage."
   :type 'boolean
   :group 'ai-code-onboarding)
 
-;;;###autoload
 (defcustom ai-code-onboarding-seen nil
   "Whether the user has already seen the onboarding quickstart."
   :type 'boolean
