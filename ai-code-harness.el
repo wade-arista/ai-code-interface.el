@@ -328,9 +328,18 @@ See the later `defcustom' for user-facing documentation and default.")
 (defvar ai-code-discussion-auto-follow-up-suffix nil
   "Send-time prompt suffix that requests numbered next-step suggestions.")
 
-(defvar ai-code-discussion-auto-follow-up-enabled t
-  "Forward declaration for `ai-code-discussion-auto-follow-up-enabled'.
-See the later `defcustom' for user-facing documentation and default.")
+;;;###autoload
+(defcustom ai-code-discussion-auto-follow-up-enabled t
+  "When non-nil, prompts may request numbered next-step suggestions.
+This can be nil to disable it, always to always append without prompt,
+or ask-me (or t) to ask the user on each send."
+  :type '(choice (const :tag "Ask each send" ask-me)
+                 (const :tag "Always" always)
+                 (const :tag "Off" nil))
+  :set (lambda (symbol value)
+         (set-default symbol value)
+         (set symbol value))
+  :group 'ai-code)
 
 (defvar ai-code-discussion-auto-follow-up-on-code-change nil
   "Forward declaration for `ai-code-discussion-auto-follow-up-on-code-change'.
@@ -644,18 +653,6 @@ Send-time routing uses this result for test and discussion follow-up suffixes."
 When non-nil, next-step suggestions can be appended to code-change prompts
 as well, depending on the routing choice."
   :type 'boolean
-  :group 'ai-code)
-
-(defcustom ai-code-discussion-auto-follow-up-enabled t
-  "When non-nil, prompts may request numbered next-step suggestions.
-This can be nil to disable it, always to always append without prompt,
-or ask-me (or t) to ask the user on each send."
-  :type '(choice (const :tag "Ask each send" ask-me)
-                 (const :tag "Always" always)
-                 (const :tag "Off" nil))
-  :set (lambda (symbol value)
-         (set-default symbol value)
-         (set symbol value))
   :group 'ai-code)
 
 (provide 'ai-code-harness)
