@@ -2804,6 +2804,82 @@ the platform makes the literal path a symlink, such as /tmp on macOS."
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
+(ert-deftest test-ai-code-backends-infra-send-line-missing-project-prompts-by-directory ()
+  "Sending without a project session should prompt for any backend session."
+  (let* ((prefix "codex")
+         (working-dir "/tmp/ai-code-send-missing-current/")
+         (other-dir-a "/tmp/ai-code-send-other-a/")
+         (other-dir-b "/tmp/ai-code-send-other-b/")
+         (source (generate-new-buffer " *ai-code-source-send-missing*"))
+         (session-a (get-buffer-create "*codex[send-other-a]*"))
+         (session-b (get-buffer-create "*codex[send-other-b:review]*"))
+         captured-collection
+         send-targets)
+    (unwind-protect
+        (progn
+          (clrhash ai-code-backends-infra--directory-buffer-map)
+          (when (boundp 'ai-code-backends-infra--file-session-map)
+            (clrhash ai-code-backends-infra--file-session-map))
+
+          (with-current-buffer source
+            (setq buffer-file-name "/tmp/ai-code-send-missing-current/main.el")
+            (setq default-directory working-dir))
+          (with-current-buffer session-a
+            (setq-local ai-code-backends-infra--session-directory other-dir-a)
+            (setq-local ai-code-backends-infra--session-prefix prefix))
+          (with-current-buffer session-b
+            (setq-local ai-code-backends-infra--session-directory other-dir-b)
+            (setq-local ai-code-backends-infra--session-prefix prefix))
+
+          (cl-letf (((symbol-function 'ai-code-backends-infra--find-session-buffers)
+                     (lambda (_prefix _dir) nil))
+                    ((symbol-function 'completing-read)
+                     (lambda (_prompt collection _predicate _require-match
+                              &rest _args)
+                       (setq captured-collection collection)
+                       (format "%s [review]" other-dir-b)))
+                    ((symbol-function 'ai-code-backends-infra--terminal-send-string)
+                     (lambda (&rest _args)
+                       (push (buffer-name (current-buffer)) send-targets)))
+                    ((symbol-function 'ai-code-backends-infra--terminal-send-return)
+                     (lambda () nil))
+                    ((symbol-function 'sit-for)
+                     (lambda (&rest _args) nil)))
+            (with-current-buffer source
+              (ai-code-backends-infra--send-line-to-session
+               nil
+               "missing"
+               "review this"
+               prefix
+               working-dir
+               nil)))
+
+          (should (equal captured-collection
+                         (list other-dir-a
+                               (format "%s [review]" other-dir-b))))
+          (should (equal (nreverse send-targets)
+                         (list "*codex[send-other-b:review]*")))
+          (should (eq (gethash
+                       (ai-code-backends-infra--file-session-map-key
+                        prefix
+                        source)
+                       ai-code-backends-infra--file-session-map)
+                      session-b)))
+          (should (eq (gethash
+                       (ai-code-backends-infra--session-map-key
+                        prefix
+                        other-dir-b)
+                       ai-code-backends-infra--directory-buffer-map)
+                      session-b))
+          (should-not (gethash
+                       (ai-code-backends-infra--session-map-key
+                        prefix
+                        working-dir)
+                       ai-code-backends-infra--directory-buffer-map))
+      (dolist (buf (list source session-a session-b))
+        (when (buffer-live-p buf)
+          (kill-buffer buf))))))
+
 (ert-deftest test-ai-code-backends-infra-select-session-buffer-skips-renamed-remembered-on-force-prompt ()
   "Force prompt should not offer renamed remembered buffers as completion candidates."
   (let* ((prefix "codex")
@@ -3230,6 +3306,73 @@ the platform makes the literal path a symlink, such as /tmp on macOS."
             (ai-code-backends-infra--file-session-map-key prefix source)
             ai-code-backends-infra--file-session-map)))
       (dolist (buf (list source attached))
+        (when (buffer-live-p buf)
+          (kill-buffer buf))))))
+
+(ert-deftest test-ai-code-backends-infra-switch-missing-project-prompts-by-directory ()
+  "Switching without a project session should prompt for any backend session."
+  (let* ((prefix "codex")
+         (working-dir "/tmp/ai-code-switch-missing-current/")
+         (other-dir-a "/tmp/ai-code-switch-other-a/")
+         (other-dir-b "/tmp/ai-code-switch-other-b/")
+         (source (generate-new-buffer " *ai-code-source-switch-missing*"))
+         (session-a (get-buffer-create "*codex[switch-other-a]*"))
+         (session-b (get-buffer-create "*codex[switch-other-b:review]*"))
+         captured-prompt
+         captured-collection
+         captured-default
+         displayed)
+    (unwind-protect
+        (progn
+          (clrhash ai-code-backends-infra--directory-buffer-map)
+          (when (boundp 'ai-code-backends-infra--file-session-map)
+            (clrhash ai-code-backends-infra--file-session-map))
+
+          (with-current-buffer source
+            (setq buffer-file-name "/tmp/ai-code-switch-missing-current/main.el")
+            (setq default-directory working-dir))
+          (with-current-buffer session-a
+            (setq-local ai-code-backends-infra--session-directory other-dir-a))
+          (with-current-buffer session-b
+            (setq-local ai-code-backends-infra--session-directory other-dir-b))
+
+          (cl-letf (((symbol-function 'ai-code-backends-infra--find-session-buffers)
+                     (lambda (_prefix _dir) nil))
+                    ((symbol-function 'completing-read)
+                     (lambda (prompt collection _predicate _require-match
+                              &optional _initial-input _hist def &rest _)
+                       (setq captured-prompt prompt
+                             captured-collection collection
+                             captured-default def)
+                       (format "%s [review]" other-dir-b)))
+                    ((symbol-function 'get-buffer-window)
+                     (lambda (&rest _args) nil))
+                    ((symbol-function 'ai-code-backends-infra--display-buffer-in-side-window)
+                     (lambda (buffer)
+                       (setq displayed buffer)
+                       nil)))
+            (with-current-buffer source
+              (ai-code-backends-infra--switch-to-session-buffer
+               nil
+               "missing"
+               prefix
+               working-dir
+               nil)))
+
+          (should (equal captured-prompt
+                         "Select codex session by directory: "))
+          (should (equal captured-collection
+                         (list other-dir-a
+                               (format "%s [review]" other-dir-b))))
+          (should (equal captured-default other-dir-a))
+          (should (eq displayed session-b))
+          (should (eq (gethash
+                       (ai-code-backends-infra--session-map-key
+                        prefix
+                        other-dir-b)
+                       ai-code-backends-infra--directory-buffer-map)
+                      session-b)))
+      (dolist (buf (list source session-a session-b))
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 

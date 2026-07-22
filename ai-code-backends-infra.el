@@ -880,11 +880,14 @@ Return a cons of (BUFFER . MISSING-P)."
           (cons nil nil)))))))
 
 (defun ai-code-backends-infra--resolve-session-buffer (buffer-name missing-message prefix working-dir
-                                                                  force-prompt source-buffer)
+                                                                  force-prompt source-buffer
+                                                                  &optional any-session-fallback)
   "Resolve session buffer using BUFFER-NAME or selection rules.
 MISSING-MESSAGE is used when no target session exists.
 When PREFIX and WORKING-DIR are present, prefer the attached session for
-SOURCE-BUFFER unless FORCE-PROMPT is non-nil."
+SOURCE-BUFFER unless FORCE-PROMPT is non-nil.
+When ANY-SESSION-FALLBACK is non-nil, prompt for any existing PREFIX
+session if no session exists for WORKING-DIR."
   (let* ((file-session-key (and prefix
                                 source-buffer
                                 (ai-code-backends-infra--file-session-map-key
@@ -921,7 +924,25 @@ SOURCE-BUFFER unless FORCE-PROMPT is non-nil."
           (ai-code-backends-infra--remember-session-buffer prefix working-dir buffer)
           (ai-code-backends-infra--remember-file-session-buffer prefix source-buffer buffer)
           buffer)
-      (user-error "%s" missing-message))))
+      (if-let ((fallback-buffer
+                (and (null buffer-name)
+                     prefix
+                     any-session-fallback
+                     (ai-code-backends-infra--select-any-session-buffer prefix))))
+          (progn
+            (when-let ((fallback-directory
+                        (ai-code-backends-infra--buffer-session-directory
+                         fallback-buffer)))
+              (ai-code-backends-infra--remember-session-buffer
+               prefix
+               fallback-directory
+               fallback-buffer))
+            (ai-code-backends-infra--remember-file-session-buffer
+             prefix
+             source-buffer
+             fallback-buffer)
+            fallback-buffer)
+        (user-error "%s" missing-message)))))
 
 (defun ai-code-backends-infra--set-session-directory (buffer directory)
   "Store DIRECTORY on BUFFER for exact session matching."
@@ -944,6 +965,11 @@ SOURCE-BUFFER unless FORCE-PROMPT is non-nil."
          (ai-code-backends-infra--normalize-session-directory
           default-directory))
         (t nil)))))
+
+(defun ai-code-backends-infra--buffer-session-directory (buffer)
+  "Return BUFFER session directory.
+This is the internal accessor used by session selection code."
+  (ai-code-backends-infra-session-directory buffer))
 
 (defun ai-code-backends-infra--source-task-file (source-buffer)
   "Return the AI task file associated with SOURCE-BUFFER, or nil."
@@ -1016,6 +1042,76 @@ Return a cons of (base-name . instance-name) or nil."
   "Return instance name for BUFFER-NAME with PREFIX."
   (when-let* ((parsed (ai-code-backends-infra--parse-session-buffer-name buffer-name prefix)))
     (ai-code-backends-infra--normalize-instance-name (cdr parsed))))
+
+(defun ai-code-backends-infra--buffer-session-prefix-p (buffer prefix)
+  "Return non-nil when BUFFER belongs to session PREFIX."
+  (and (buffer-live-p buffer)
+       (or (ai-code-backends-infra--parse-session-buffer-name
+            (buffer-name buffer)
+            prefix)
+           (with-current-buffer buffer
+             (equal ai-code-backends-infra--session-prefix prefix)))))
+
+(defun ai-code-backends-infra--buffer-session-instance-name (buffer prefix)
+  "Return BUFFER instance name for PREFIX."
+  (or (ai-code-backends-infra--session-instance-name (buffer-name buffer) prefix)
+      "default"))
+
+(defun ai-code-backends-infra--all-session-buffers (prefix)
+  "Return all live session buffers for PREFIX with known directories."
+  (cl-remove-if-not
+   (lambda (buffer)
+     (and (ai-code-backends-infra--buffer-session-prefix-p buffer prefix)
+          (ai-code-backends-infra--buffer-session-directory buffer)))
+   (buffer-list)))
+
+(defun ai-code-backends-infra--session-choice-label (prefix buffer)
+  "Return a directory-oriented completion label for BUFFER and PREFIX."
+  (let* ((directory (ai-code-backends-infra--buffer-session-directory buffer))
+         (instance (ai-code-backends-infra--buffer-session-instance-name
+                    buffer
+                    prefix))
+         (directory-label (abbreviate-file-name directory)))
+    (if (string= instance "default")
+        directory-label
+      (format "%s [%s]" directory-label instance))))
+
+(defun ai-code-backends-infra--uniquify-session-choices (choices)
+  "Return CHOICES with duplicate labels disambiguated by buffer name."
+  (let ((counts (make-hash-table :test 'equal)))
+    (dolist (choice choices)
+      (puthash (car choice)
+               (1+ (gethash (car choice) counts 0))
+               counts))
+    (mapcar (lambda (choice)
+              (let ((label (car choice))
+                    (buffer (cdr choice)))
+                (if (> (gethash label counts 0) 1)
+                    (cons (format "%s - %s" label (buffer-name buffer))
+                          buffer)
+                  choice)))
+            choices)))
+
+(defun ai-code-backends-infra--select-any-session-buffer (prefix)
+  "Prompt for an existing session buffer for PREFIX, listed by directory."
+  (let* ((choices (sort
+                   (mapcar (lambda (buffer)
+                             (cons (ai-code-backends-infra--session-choice-label
+                                    prefix
+                                    buffer)
+                                   buffer))
+                           (ai-code-backends-infra--all-session-buffers prefix))
+                   (lambda (left right)
+                     (string< (car left) (car right)))))
+         (unique-choices
+          (ai-code-backends-infra--uniquify-session-choices choices)))
+    (when unique-choices
+      (let* ((candidates (mapcar #'car unique-choices))
+             (selection (completing-read
+                         (format "Select %s session by directory: " prefix)
+                         candidates
+                         nil t nil nil (car candidates))))
+        (cdr (assoc selection unique-choices))))))
 
 (defun ai-code-backends-infra--find-session-buffers (prefix directory)
   "Return session buffers for PREFIX in DIRECTORY."
@@ -1134,7 +1230,8 @@ DEFAULT-INSTANCE-NAME seeds the minibuffer when prompting."
         "default")))
 
 (defun ai-code-backends-infra--resume-switch-p (switches)
-  "Return non-nil when SWITCHES indicate a resume-style CLI invocation."
+  "Check resume-style CLI flag presence.
+SWITCHES is the command argument list."
   (cl-some (lambda (switch)
              (member switch '("resume" "--resume" "--continue")))
            switches))
@@ -1650,7 +1747,8 @@ When PREFIX and WORKING-DIR are provided, select from multiple sessions."
                   prefix
                   working-dir
                   force-prompt
-                  source-buffer)))
+                  source-buffer
+                  t)))
     (if-let* ((window (get-buffer-window buffer)))
         (select-window window)
       (ai-code-backends-infra--display-buffer-in-side-window buffer))))
@@ -1666,11 +1764,16 @@ When PREFIX and WORKING-DIR are provided, select from multiple sessions."
                   prefix
                   working-dir
                   force-prompt
-                  source-buffer)))
+                  source-buffer
+                  t)))
     (when (fboundp 'ai-code-mcp-agent-refresh-source-context)
       (ai-code-mcp-agent-refresh-source-context buffer source-buffer))
     (with-current-buffer buffer
-      (ai-code-backends-infra--remember-session-buffer prefix working-dir buffer)
+      (ai-code-backends-infra--remember-session-buffer
+       prefix
+       (or (ai-code-backends-infra--buffer-session-directory buffer)
+           working-dir)
+       buffer)
       (if (and (string-match-p "\n" line)
                (member ai-code-backends-infra--session-prefix
                        ai-code-backends-infra-use-paste-backends))
