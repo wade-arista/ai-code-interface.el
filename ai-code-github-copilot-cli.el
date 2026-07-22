@@ -55,8 +55,7 @@ that `/terminal-setup' installs for Shift+Enter and Ctrl+Enter."
 ;;;###autoload
 (defun ai-code-github-copilot-cli (&optional arg)
   "Start GitHub Copilot CLI using `ai-code-backends-infra' logic.
-With prefix ARG, prompt for CLI args using
-`ai-code-github-copilot-cli-program-switches' as the default input."
+With prefix ARG, prompt for the session working directory."
   (interactive "P")
   (ai-code-backends-infra--start-cli-session
    (list :program ai-code-github-copilot-cli-program

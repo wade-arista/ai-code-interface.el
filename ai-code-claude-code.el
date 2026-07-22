@@ -58,8 +58,7 @@ This mirrors the newline sequence Claude Code expects from `/terminal-setup'."
 ;;;###autoload
 (defun ai-code-claude-code (&optional arg)
   "Start Claude Code using `ai-code-backends-infra' logic.
-With prefix ARG, prompt for CLI args using
-`ai-code-claude-code-program-switches' as the default input."
+With prefix ARG, prompt for the session working directory."
   (interactive "P")
   (ai-code-backends-infra--start-cli-session
    (list :program ai-code-claude-code-program

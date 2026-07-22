@@ -38,8 +38,7 @@
 ;;;###autoload
 (defun ai-code-antigravity-cli (&optional arg)
   "Start Antigravity CLI using `ai-code-backends-infra' logic.
-With prefix ARG, prompt for CLI args using
-`ai-code-antigravity-cli-program-switches' as the default input."
+With prefix ARG, prompt for the session working directory."
   (interactive "P")
   (ai-code-backends-infra--start-cli-session
    (list :program ai-code-antigravity-cli-program

@@ -322,14 +322,19 @@ the platform makes the literal path a symlink, such as /tmp on macOS."
         (escape-fn (lambda () nil))
         (cleanup-fn (lambda () nil))
         (post-start-fn (lambda (_buffer _process _instance) nil))
+        seen-directory-prompt
         captured)
     (cl-letf (((symbol-function 'ai-code-backends-infra--session-working-directory)
-               (lambda (&optional _prompt-p) "/project/"))
+               (lambda () "/project/"))
+              ((symbol-function 'read-directory-name)
+               (lambda (prompt &optional dir default-dir mustmatch &rest _args)
+                 (setq seen-directory-prompt (list prompt dir default-dir mustmatch))
+                 "/other-project/"))
               ((symbol-function 'ai-code-backends-infra--resolve-start-command)
                (lambda (program switches arg prompt-label)
                  (should (equal program "codex"))
                  (should (equal switches '("--quiet")))
-                 (should (eq arg 'prefix-arg))
+                 (should-not arg)
                  (should (equal prompt-label "Codex"))
                  '(:command "codex --quiet"
                    :argv ("codex" "--quiet"))))
@@ -347,15 +352,18 @@ the platform makes the literal path a symlink, such as /tmp on macOS."
              :escape-function escape-fn
              :prepare-launch
              (lambda (working-dir argv)
-               (should (equal working-dir "/project/"))
+               (should (equal working-dir "/other-project/"))
                (should (equal argv '("codex" "--quiet")))
                (list :argv '("codex" "--quiet" "--mcp")
                      :env-vars '("AI_CODE_MCP_BEARER_TOKEN=secret")
                      :cleanup-fn cleanup-fn
                      :post-start-fn post-start-fn)))
        'prefix-arg))
+    (should (equal seen-directory-prompt
+                   '("Start AI CLI in directory: "
+                     "/project/" "/project/" t)))
     (should (equal captured
-                   (list "/project/"
+                   (list "/other-project/"
                          nil
                          process-table
                          '("codex" "--quiet" "--mcp")
@@ -363,61 +371,51 @@ the platform makes the literal path a symlink, such as /tmp on macOS."
                          cleanup-fn
                          nil
                          "codex"
-                         'prefix-arg
+                         nil
                          '("AI_CODE_MCP_BEARER_TOKEN=secret"
                            "TERM_PROGRAM=vscode")
                          "\r\n"
                          post-start-fn)))))
 
-(ert-deftest test-ai-code-backends-infra-start-cli-session-prompts-dir-after-args ()
-  "Working directory prompting should happen after CLI args prompting.
-The prefix argument should also force instance-name prompting."
+(ert-deftest test-ai-code-backends-infra-start-cli-session-resume-prefix-edits-args ()
+  "Resume-style startup should keep prefix args for command editing."
   (let ((process-table (make-hash-table :test 'equal))
-        call-order
         captured)
-    (cl-letf (((symbol-function 'ai-code--session-project-root)
+    (cl-letf (((symbol-function 'ai-code-backends-infra--session-working-directory)
                (lambda () "/project/"))
-              ((symbol-function 'ai-code-backends-infra--resolve-start-command)
-               (lambda (program switches arg prompt-label)
-                 (setq call-order (append call-order '(args)))
-                 (should (equal program "codex"))
-                 (should (equal switches '("--quiet")))
-                 (should (eq arg 'prefix-arg))
-                 (should (equal prompt-label "Codex"))
-                 '(:command "codex --quiet")))
               ((symbol-function 'read-directory-name)
                (lambda (&rest _args)
-                 (setq call-order (append call-order '(dir)))
-                 "/custom/"))
+                 (ert-fail "resume prefix should not prompt for a directory")))
+              ((symbol-function 'ai-code-backends-infra--resolve-start-command)
+               (lambda (program switches arg prompt-label)
+                 (should (equal program "codex"))
+                 (should (equal switches '("resume")))
+                 (should (eq arg 'prefix-arg))
+                 (should (equal prompt-label "Codex"))
+                 '(:command "codex resume --last")))
               ((symbol-function 'ai-code-backends-infra--toggle-or-create-session)
                (lambda (&rest args)
                  (setq captured args))))
       (ai-code-backends-infra--start-cli-session
        (list :program "codex"
-             :switches '("--quiet")
+             :switches '("resume")
              :label "Codex"
              :process-table process-table
              :session-prefix "codex")
        'prefix-arg))
-    (should (equal call-order '(args dir)))
-    (cl-destructuring-bind
-        (working-dir buffer-name seen-process-table argv
-                     &optional escape-fn cleanup-fn instance-name prefix
-                     force-prompt env-vars multiline-input-sequence
-                     post-start-fn)
-        captured
-      (should (equal working-dir "/custom/"))
-      (should-not buffer-name)
-      (should (eq seen-process-table process-table))
-      (should (equal argv '("codex" "--quiet")))
-      (should-not escape-fn)
-      (should-not cleanup-fn)
-      (should-not instance-name)
-      (should (equal prefix "codex"))
-      (should (eq force-prompt 'prefix-arg))
-      (should-not env-vars)
-      (should-not multiline-input-sequence)
-      (should-not post-start-fn))))
+    (should (equal captured
+                   (list "/project/"
+                         nil
+                         process-table
+                         '("codex" "resume" "--last")
+                         nil
+                         nil
+                         nil
+                         "codex"
+                         'prefix-arg
+                         nil
+                         nil
+                         nil)))))
 
 (ert-deftest test-ai-code-backends-infra-cli-switch-and-send-use-project-session ()
   "CLI wrapper switch and send helpers should resolve project sessions."

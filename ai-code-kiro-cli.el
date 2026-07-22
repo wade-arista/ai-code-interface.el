@@ -64,8 +64,7 @@
 ;;;###autoload
 (defun ai-code-kiro-cli (&optional arg)
   "Start Kiro CLI chat session.
-With prefix ARG, prompt for CLI args using the current defaults
-including chat, agent, trust flags, and `ai-code-kiro-cli-program-switches'."
+With prefix ARG, prompt for the session working directory."
   (interactive "P")
   (ai-code-backends-infra--start-cli-session
    (list :program ai-code-kiro-cli-program

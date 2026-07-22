@@ -51,8 +51,7 @@ buffer so that terminal scrollback is partially preserved."
 ;;;###autoload
 (defun ai-code-kilo (&optional arg)
   "Start Kilo using `ai-code-backends-infra' logic.
-With prefix ARG, prompt for CLI args using
-`ai-code-kilo-program-switches' as the default input."
+With prefix ARG, prompt for the session working directory."
   (interactive "P")
   (ai-code-backends-infra--start-cli-session
    (list :program ai-code-kilo-program

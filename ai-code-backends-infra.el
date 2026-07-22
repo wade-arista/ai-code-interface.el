@@ -1133,6 +1133,19 @@ DEFAULT-INSTANCE-NAME seeds the minibuffer when prompting."
     (or (ai-code-backends-infra--branch-instance-name existing-instance-names)
         "default")))
 
+(defun ai-code-backends-infra--resume-switch-p (switches)
+  "Return non-nil when SWITCHES indicate a resume-style CLI invocation."
+  (cl-some (lambda (switch)
+             (member switch '("resume" "--resume" "--continue")))
+           switches))
+
+(defun ai-code-backends-infra--read-session-working-directory (default-dir)
+  "Read a session working directory using DEFAULT-DIR as the default."
+  (file-name-as-directory
+   (expand-file-name
+    (read-directory-name "Start AI CLI in directory: "
+                         default-dir default-dir t))))
+
 (defun ai-code-backends-infra--resolve-start-command (program switches arg &optional prompt-label)
   "Resolve PROGRAM and its arguments into display and argv forms.
 SWITCHES is the default command-line argument list.
@@ -1141,9 +1154,7 @@ PROMPT-LABEL is used in the minibuffer prompt.
 When resuming and the active region contains a UUID, prompt as though ARG
 were non-nil and append that UUID to the default CLI args."
   (let* ((found-resume-switch
-          (cl-some (lambda (switch)
-                     (member switch '("resume" "--resume")))
-                   switches))
+          (ai-code-backends-infra--resume-switch-p switches))
          (selected-session-id
           (and (null arg)
                found-resume-switch
@@ -1352,8 +1363,7 @@ behavior."
 
 (defun ai-code-backends-infra--start-cli-session (options arg)
   "Start a generic CLI session described by OPTIONS and prefix ARG.
-When ARG is non-nil, prompt for CLI args, working directory, and
-instance name.
+When ARG is non-nil for normal starts, prompt for the working directory.
 OPTIONS is a plist with these keys:
 :program is the CLI executable.
 :switches is the default list of CLI switches.
@@ -1368,15 +1378,24 @@ multiline input.
 :prepare-launch is an optional function called with (WORKING-DIR ARGV).
 When :prepare-launch is present, it may return :argv, :env-vars,
 :cleanup-fn, and :post-start-fn entries to customize session creation.
-A legacy :command entry is normalized to argv for compatibility."
-  (let* ((resolved (ai-code-backends-infra--resolve-start-command
+A legacy :command entry is normalized to argv for compatibility.
+
+For normal starts, non-nil ARG prompts for the working directory.  For
+resume-style invocations, ARG is still passed through so the user can edit
+the resume command-line arguments."
+  (let* ((switches (plist-get options :switches))
+         (resume-start-p (ai-code-backends-infra--resume-switch-p switches))
+         (default-working-dir (ai-code-backends-infra--session-working-directory))
+         (working-dir (if (and arg (not resume-start-p))
+                          (ai-code-backends-infra--read-session-working-directory
+                           default-working-dir)
+                        default-working-dir))
+         (command-arg (and (or (not arg) resume-start-p) arg))
+         (resolved (ai-code-backends-infra--resolve-start-command
                     (plist-get options :program)
-                    (plist-get options :switches)
-                    arg
+                    switches
+                    command-arg
                     (plist-get options :label)))
-         (working-dir (if arg
-                          (ai-code-backends-infra--session-working-directory arg)
-                        (ai-code-backends-infra--session-working-directory)))
          (argv
           (ai-code-backends-infra--command-argv
            (or (plist-get resolved :argv)
@@ -1402,7 +1421,7 @@ A legacy :command entry is normalized to argv for compatibility."
        cleanup-fn
        nil
        (plist-get options :session-prefix)
-       arg
+       (and resume-start-p arg)
        (append launch-env-vars (plist-get options :env-vars))
        (plist-get options :multiline-input-sequence)
        post-start-fn))))

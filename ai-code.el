@@ -564,7 +564,7 @@ Shows the current backend label to the right."
 
 ;; Mirror aider.el's reusable-section approach using `transient-define-group`.
 (transient-define-group ai-code--menu-ai-cli-session
-  ("a" "Start AI CLI (C-u: args)" ai-code-cli-start)
+  ("a" "Start AI CLI (C-u: directory)" ai-code-cli-start)
   ("R" "Resume AI CLI (C-u: args)" ai-code-cli-resume-with-session-checkpoint)
   ("z" "Switch to AI CLI (C-u: hide)" ai-code-cli-switch-to-buffer-or-hide)
   ("s" ai-code-select-backend :description ai-code--select-backend-description)

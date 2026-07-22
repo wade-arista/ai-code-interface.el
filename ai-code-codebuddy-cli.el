@@ -37,8 +37,7 @@
 ;;;###autoload
 (defun ai-code-codebuddy-cli (&optional arg)
   "Start CodeBuddy using `ai-code-backends-infra' logic.
-With prefix ARG, prompt for CLI args using
-`ai-code-codebuddy-cli-program-switches' as the default input."
+With prefix ARG, prompt for the session working directory."
   (interactive "P")
   (ai-code-backends-infra--start-cli-session
    (list :program ai-code-codebuddy-cli-program
