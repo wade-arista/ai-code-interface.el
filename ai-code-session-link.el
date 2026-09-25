@@ -510,6 +510,17 @@ Tolerates Ghostel hard-wrapping via
                          (project-files project)))))
            (directory-files-recursively root ".*" t))))))
 
+(defun ai-code-session-link--relative-under-project-root (file project-root)
+  "Return FILE as a path relative to PROJECT-ROOT when FILE is inside that tree.
+Uses prefix stripping on expanded names only, avoiding per-file `file-remote-p'
+work that makes `file-relative-name' expensive inside tight loops."
+  (when (and (stringp file) (stringp project-root))
+    (let* ((abs-file (expand-file-name file))
+           (root-dir (file-name-as-directory (expand-file-name project-root))))
+      (when (string-prefix-p root-dir abs-file)
+        (let ((rel (substring abs-file (length root-dir))))
+          (if (string-empty-p rel) "." rel))))))
+
 (defun ai-code-session-link--in-project-file-p (file root &optional project-files)
   "Return non-nil when FILE exists and belongs to ROOT.
 Optional PROJECT-FILES supplies the project file list."
@@ -533,9 +544,11 @@ Optional PROJECT-FILES supplies the project file list."
            (project-files (or project-files
                               (ai-code-session-link--project-files project-root))))
       (cl-remove-if-not
-       (lambda (file)
-         (or (string= (file-relative-name file project-root) relative-path)
-             (string= (file-name-nondirectory file) basename)))
+       (lambda (proj-file)
+         (or (equal (ai-code-session-link--relative-under-project-root
+                     proj-file project-root)
+                    relative-path)
+             (string= (file-name-nondirectory proj-file) basename)))
        project-files))))
 
 (defun ai-code-session-link--project-root-for-paths ()
