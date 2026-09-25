@@ -1,4 +1,4 @@
-;;; ai-code-input.el --- Helm completion for ai-code.el -*- lexical-binding: t; -*-
+;;; ai-code-input.el --- Input helpers for ai-code.el -*- lexical-binding: t; -*-
 
 ;; Author: Kang Tu <tninja@gmail.com>
 ;; Keywords: convenience, tools
@@ -6,8 +6,7 @@
 ;; SPDX-License-Identifier: Apache-2.0
 
 ;;; Commentary:
-;; Optional Helm completion interface for ai-code.el
-;; To use this, ensure both ai-code.el and helm are installed.
+;; Shared input helpers for ai-code.el.
 
 ;;; Code:
 
@@ -48,14 +47,11 @@ _CANDIDATE-LIST is accepted for interface compatibility but ignored.
 Uses `read-string' directly to avoid `helm-mode' intercepting `completing-read'."
   (read-string prompt initial-input 'ai-code-read-string-history))
 
-(defvar ai-code--read-string-fn #'ai-code-plain-read-string
-  "Function used by `ai-code-read-string' to read user input.")
-
 ;;;###autoload
-(defun ai-code-read-string (prompt &optional initial-input candidate-list)
+(defun ai-code-read-string (prompt &optional initial-input _candidate-list)
   "Read a string from the user with PROMPT and optional INITIAL-INPUT.
-CANDIDATE-LIST provides additional completion options if provided."
-  (funcall ai-code--read-string-fn prompt initial-input candidate-list))
+_CANDIDATE-LIST is accepted for compatibility but ignored."
+  (read-string prompt initial-input 'ai-code-read-string-history))
 
 (defun ai-code--confirm-and-send (prompt-label initial-prompt)
   "Let user edit INITIAL-PROMPT with PROMPT-LABEL, then send to AI.
@@ -215,20 +211,6 @@ original buffer, send it to an AI coding session, or copy it to the clipboard."
       (while (not (equal ?\r (read-char)))
         (sit-for 0.5))
       (whisper-run))))
-
-;;;###autoload
-(when (featurep 'helm)
-  (setq ai-code--read-string-fn #'ai-code-helm-read-string))
-
-(defun ai-code--enable-helm-read-string (&rest _args)
-  "Enable Helm-backed prompt reading after Helm is loaded."
-  (when (featurep 'helm)
-    (setq ai-code--read-string-fn #'ai-code-helm-read-string)
-    (remove-hook 'after-load-functions #'ai-code--enable-helm-read-string)))
-
-(unless (featurep 'helm)
-  (add-hook 'after-load-functions #'ai-code--enable-helm-read-string))
-
 
 (defun ai-code--imenu-subalist-p (payload)
   "Return non-nil when PAYLOAD resembles an imenu sub-alist."

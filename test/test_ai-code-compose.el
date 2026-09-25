@@ -5,26 +5,28 @@
 (require 'ai-code-input)
 
 (ert-deftest ai-code-compose-test-read-string-stays-on-existing-reader ()
-  "Direct `ai-code-read-string' calls do not use compose by command name."
+  "Direct `ai-code-read-string' calls use the ordinary minibuffer reader."
   (let ((ai-code-use-compose-buffer t)
-        (ai-code--read-string-fn (lambda (&rest _args) "existing reader"))
         (this-command 'ai-code-code-change))
     (cl-letf (((symbol-function 'ai-code-compose-read)
                (lambda (&rest _args)
-                 (ert-fail "compose reader should not be called"))))
+                 (ert-fail "compose reader should not be called")))
+              ((symbol-function 'read-string)
+               (lambda (&rest _args) "ordinary reader")))
       (should (equal (ai-code-read-string "Change: " "one\ntwo\nthree\nfour\nfive\nsix")
-                     "existing reader")))))
+                     "ordinary reader")))))
 
 (ert-deftest ai-code-compose-test-two-line-confirm-keeps-existing-reader ()
   "Two-line prompts stay on the existing reader even when compose is enabled."
   (let ((ai-code-use-compose-buffer t)
-        (ai-code--read-string-fn (lambda (&rest _args) "edited short prompt"))
         (this-command 'ai-code-send-quick-prompt)
         (prompt "one\ntwo")
         sent)
     (cl-letf (((symbol-function 'ai-code-compose-read)
                (lambda (&rest _args)
                  (ert-fail "compose reader should not be called")))
+              ((symbol-function 'read-string)
+               (lambda (&rest _args) "edited short prompt"))
               ((symbol-function 'ai-code--insert-prompt)
                (lambda (text)
                  (setq sent text)
